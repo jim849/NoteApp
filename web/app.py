@@ -6,8 +6,8 @@ Do not deploy this anywhere real.
 import os
 import csv
 import io
-import json
 import hmac
+import json
 import time
 import base64
 import hashlib
@@ -15,10 +15,16 @@ import subprocess
 
 import psycopg2
 import psycopg2.extras
+
+from argon2 import PasswordHasher
+from argon2.exceptions import VerificationError
+
 from flask import (
     Flask, request, session, redirect, url_for,
     render_template, Response, jsonify, abort,
 )
+
+ph = PasswordHasher()
 
 # --- Configuration ------------------------------------------------------------
 # All configuration comes from the environment (set in docker-compose.yml).
@@ -141,37 +147,75 @@ def index():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     error = None
+
     if request.method == "POST":
         username = request.form.get("username", "")
         password = request.form.get("password", "")
-        # Flaw #8: SQL injection. Query built by string concatenation, no params.
-        query = (
-            "SELECT id, username, role FROM users "
-            "WHERE username = '" + username + "' AND password = '" + password + "'"
-        )
+
         conn = get_db()
         cur = conn.cursor()
+        row = None
+
         try:
-            cur.execute(query)
-            row = cur.fetchone()
-        except Exception as e:
-            # Keep the raw error visible - helps the SQLi session.
-            error = f"Query error: {e}"
-            row = None
-        conn.close()
+            # Fetch user by username, using a parameterized query
+            cur.execute(
+                "SELECT id, username, password, role "
+                "FROM users WHERE username = %s",
+                (username,),
+            )
+            candidate = cur.fetchone()
+
+            if candidate:
+                stored = candidate["password"]
+
+                if stored.startswith("$argon2"):
+                    # Account already migrated
+                    try:
+                        valid = ph.verify(stored, password)
+                    except VerificationError:
+                        valid = False
+
+                else:
+                    # Legacy plaintext password
+                    valid = (stored == password)
+
+                    # Migrate after successful login
+                    if valid:
+                        new_hash = ph.hash(password)
+                        cur.execute(
+                            "UPDATE users SET password = %s WHERE id = %s",
+                            (new_hash, candidate["id"]),
+                        )
+                        conn.commit()
+
+                if valid:
+                    row = candidate
+
+        except Exception:
+            error = "Login error."
+
+        finally:
+            conn.close()
+
         if row:
             session["user_id"] = row["id"]
             session["username"] = row["username"]
             session["role"] = row["role"]
-            # Issue a weak JWT the dashboard uses to call the API.
+
             session["token"] = make_jwt({
-                "user_id": row["id"], "username": row["username"], "role": row["role"],
+                "user_id": row["id"],
+                "username": row["username"],
+                "role": row["role"],
             })
+
             log(f"login success user={row['username']} role={row['role']}")
             return redirect(url_for("index"))
+
         if not error:
             error = "Invalid credentials."
+
         log(f"login failure username={username!r}")
+
     return render_template("login.html", error=error)
 
 
@@ -300,8 +344,15 @@ def export_csv():
     writer.writerow(["student", "class", "grade", "comment"])
     for r in rows:
         writer.writerow([r["student"], r["class"], r["grade"], r["comment"]])
+    content = buf.getvalue().encode("utf-8")
+    key = os.environ["EXPORT_HMAC_KEY"].encode("utf-8")
+    tag = hmac.new(key, content, hashlib.sha256).hexdigest()
+
+    exported = content + f"# HMAC: {tag}\n".encode("ascii")
+
     return Response(
-        buf.getvalue(), mimetype="text/csv",
+        exported,
+        mimetype="text/csv",
         headers={"Content-Disposition": "attachment; filename=grades.csv"},
     )
 
@@ -370,7 +421,7 @@ def admin_users():
         cur.execute(
             "INSERT INTO users (username, password, role, teacher_id) "
             "VALUES (%s, %s, %s, %s)",
-            (request.form.get("username"), request.form.get("password"),
+            (request.form.get("username"), ph.hash(request.form.get("password")),
              request.form.get("role", "student"), None),
         )
     elif action == "delete":

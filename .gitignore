@@ -12,3 +12,11 @@ venv/
 # Local env overrides
 .env
 .env.local
+
+nginx/certs/notesapp.key
+
+# Local certificates, exported grades, editor backups and macOS metadata
+nginx/certs/*.crt
+hmac_demo/
+.DS_Store
+*.before-*

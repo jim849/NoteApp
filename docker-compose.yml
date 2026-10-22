@@ -25,6 +25,7 @@ services:
       POSTGRES_PASSWORD: notesapp_pg_pw_2024
       JWT_SECRET: s3cr3t
       SECRET_KEY: dev-session-key
+      EXPORT_HMAC_KEY: ${EXPORT_HMAC_KEY:?请在.env中设置EXPORT_HMAC_KEY}
     ports:
       - "8080:5000"
     depends_on:
