@@ -52,6 +52,18 @@ e.g. `bob` / `bobpw`.)
 - PostgreSQL 15
 - Docker Compose (`web` and `db` services)
 
+## Session 02: threat model and data flows
+
+Our group report is in [threat-model.md](threat-model.md). Sections 2–4 contain
+the required numbered data flow diagram, trust boundaries, flow inventory, and
+initial STRIDE table, following Session 02 slides 33–34. The diagrams render in
+GitHub and other Markdown viewers with Mermaid support.
+
+The report distinguishes the original baseline at commit `1c83e42` from the
+current implementation. Later sections provide risk priorities, repository
+changes, remaining risks, and a proposed presentation outline. Source review and
+previously recorded lab results are identified separately.
+
 ## Session 03: AES-GCM comment encryption
 
 The application encrypts `notes.comment` with AES-256-GCM before every insert or
