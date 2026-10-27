@@ -18,6 +18,7 @@ import psycopg2.extras
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError
+from comment_crypto import CommentCipher, CommentDecryptionError
 
 from flask import (
     Flask, request, session, redirect, url_for,
@@ -37,6 +38,7 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "dev-session-key")
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
+comment_cipher = CommentCipher.from_env()
 
 LOG_FILE = os.environ.get("NOTESAPP_LOG", "/var/log/notesapp/app.log")
 
@@ -128,6 +130,19 @@ def login_required(role=None):
     if role and session.get("role") != role:
         return False
     return True
+
+
+def decrypt_comments(rows):
+    for row in rows:
+        row["comment"] = comment_cipher.decrypt(row["comment"])
+    return rows
+
+
+@app.errorhandler(CommentDecryptionError)
+def comment_decryption_failed(error):
+    # Do not expose ciphertext, plaintext, keys, or authentication details.
+    log("comment decryption failed")
+    return jsonify({"error": "Unable to decrypt comment."}), 500
 
 
 # --- Routes -------------------------------------------------------------------
@@ -239,6 +254,7 @@ def dashboard():
     )
     notes = cur.fetchall()
     conn.close()
+    decrypt_comments(notes)
     return render_template("dashboard.html", notes=notes, token=session.get("token"))
 
 
@@ -262,6 +278,7 @@ def api_notes(note_id):
     conn.close()
     if not note:
         return jsonify({"error": "not found"}), 404
+    decrypt_comments([note])
     note["grade"] = float(note["grade"]) if note["grade"] is not None else None
     return jsonify(note)
 
@@ -285,6 +302,7 @@ def teacher():
     cur.execute("SELECT id, username FROM users WHERE role = 'student' ORDER BY username")
     students = cur.fetchall()
     conn.close()
+    decrypt_comments(notes)
     return render_template("teacher.html", classes=classes, notes=notes, students=students)
 
 
@@ -297,7 +315,7 @@ def grades():
     student_id = request.form.get("student_id")
     class_id = request.form.get("class_id")
     grade = request.form.get("grade")
-    comment = request.form.get("comment", "")
+    comment = comment_cipher.encrypt(request.form.get("comment", ""))
     conn = get_db()
     cur = conn.cursor()
     if note_id:
@@ -339,6 +357,7 @@ def export_csv():
         )
     rows = cur.fetchall()
     conn.close()
+    decrypt_comments(rows)
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(["student", "class", "grade", "comment"])

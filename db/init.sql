@@ -28,7 +28,7 @@ CREATE TABLE notes (
     student_id INTEGER REFERENCES users(id),
     class_id   INTEGER REFERENCES classes(id),
     grade      NUMERIC(4,1),
-    comment    TEXT                    -- rendered as rich text / unescaped (planted flaw #10)
+    comment    TEXT                    -- seed plaintext; web startup migrates to AES-GCM
 );
 
 -- admin (id 1)

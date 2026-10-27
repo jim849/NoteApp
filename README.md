@@ -17,6 +17,11 @@ secret with `openssl rand -hex 32` and set `EXPORT_HMAC_KEY` in `.env` to that v
 Keep this key stable so previously exported files remain verifiable. `.env` is
 excluded from Git.
 
+Generate a second, independent secret with `openssl rand -hex 32` and set
+`COMMENT_ENCRYPTION_KEY` in `.env` to its 64 hexadecimal characters. Keep this
+encryption key stable and back it up separately from database backups: losing or
+replacing it makes previously encrypted comments unreadable.
+
 Then start the app:
 
 ```
@@ -46,6 +51,64 @@ e.g. `bob` / `bobpw`.)
 - Python 3.11 + Flask (server-rendered Jinja2 pages and a small JSON API)
 - PostgreSQL 15
 - Docker Compose (`web` and `db` services)
+
+## Session 03: AES-GCM comment encryption
+
+The application encrypts `notes.comment` with AES-256-GCM before every insert or
+update. Each encryption uses a fresh random 12-byte nonce and a 16-byte
+authentication tag. The existing TEXT column stores:
+
+```
+aesgcm:v1:<Base64(nonce || ciphertext || tag)>
+```
+
+The version and column context are authenticated using the fixed additional data
+`notesapp:notes.comment:v1`. The separate `COMMENT_ENCRYPTION_KEY` is read from the
+environment; it is never stored in the database or committed to Git.
+
+The container runs `migrate_comments.py` before starting the web server. This
+encrypts legacy/seed plaintext in one transaction without deleting any grades.
+Repeat runs validate existing ciphertext without encrypting it again. A wrong
+key, unsupported ciphertext version, or damaged authentication tag aborts the
+migration and rolls it back. SQL NULL stays NULL; empty comments are encrypted.
+
+Dashboard, teacher page, JSON API, and CSV export decrypt comments when reading.
+Malformed or tampered stored comments return a generic error; they are never
+treated as plaintext. CSV exports still contain readable comments and retain the
+existing HMAC signature. This feature protects stored comments; it does not change
+the teaching app's other deliberately planted flaws.
+
+Apply the change to an existing installation (keep `.env` and the database volume):
+
+```
+docker compose up --build -d
+```
+
+Check encrypted storage:
+
+```
+docker compose exec -T db psql -U notesapp -d notesapp -c "SELECT id, comment FROM notes ORDER BY id LIMIT 3;"
+```
+
+Sign in as `alice` or `prof.turing` to see the original comments in the app.
+Create or update a comment as the teacher, then inspect the database again to see
+the ciphertext. Do not regenerate the encryption key on restart.
+
+Run the crypto and PostgreSQL integration tests:
+
+```
+docker compose exec -T -e RUN_DB_TESTS=1 web python -m unittest discover -s tests -v
+```
+
+Integration tests create and remove a temporary schema in PostgreSQL; the normal
+application tables and comments are not modified. To run the migration manually:
+
+```
+docker compose exec -T web python migrate_comments.py
+```
+
+If starting with `python app.py` or `flask run` outside Docker, supply the same
+environment variables and run `python migrate_comments.py` before serving traffic.
 
 ## Classes 4 and 5: signed grade exports
 
