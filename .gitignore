@@ -12,6 +12,7 @@ venv/
 # Local env overrides
 .env
 .env.local
+.jwt-lab-tokens/
 
 nginx/certs/notesapp.key
 

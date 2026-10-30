@@ -33,7 +33,7 @@ DB_HOST = os.environ.get("DB_HOST", "db")
 DB_NAME = os.environ.get("DB_NAME", "notesapp")
 DB_USER = os.environ.get("DB_USER", "notesapp")
 DB_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "notesapp_pg_pw_2024")
-JWT_SECRET = os.environ.get("JWT_SECRET", "s3cr3t")
+JWT_SECRET = os.environ["JWT_SECRET"]
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-session-key")
 
 app = Flask(__name__)
@@ -62,7 +62,7 @@ def get_db():
     return conn
 
 
-# --- Minimal JWT (deliberately weak) ------------------------------------------
+# --- Minimal JWT (HS256 only) -------------------------------------------------
 def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
@@ -82,32 +82,27 @@ def make_jwt(payload: dict) -> str:
 
 
 def verify_jwt(token: str):
-    """Decode a JWT. Accepts alg:none (no signature) and HS256 with a short key.
-
-    This is intentionally broken (flaw #4): an attacker can forge any identity
-    by setting "alg":"none", and the HS256 key is trivially guessable.
-    """
+    """Accept only an HS256 JWT with a valid signature and an object payload."""
+    if not isinstance(token, str) or not token.isascii():
+        return None
     try:
         h_b64, p_b64, sig_b64 = token.split(".")
-    except ValueError:
-        return None
-    try:
         header = json.loads(_b64url_decode(h_b64))
         payload = json.loads(_b64url_decode(p_b64))
-    except Exception:
+    except (ValueError, TypeError, UnicodeError):
         return None
 
-    alg = header.get("alg", "").lower()
-    if alg == "none":
-        # No signature verification at all.
-        return payload
-    if alg == "hs256":
-        signing_input = f"{h_b64}.{p_b64}".encode()
-        expected = _b64url(hmac.new(JWT_SECRET.encode(), signing_input, hashlib.sha256).digest())
-        if hmac.compare_digest(expected, sig_b64):
-            return payload
+    if not isinstance(header, dict) or not isinstance(payload, dict):
         return None
-    return None
+    # The server pins the algorithm; untrusted headers cannot select another one.
+    if header.get("alg") != "HS256":
+        return None
+
+    signing_input = f"{h_b64}.{p_b64}".encode()
+    expected = _b64url(hmac.new(JWT_SECRET.encode(), signing_input, hashlib.sha256).digest())
+    if not hmac.compare_digest(expected, sig_b64):
+        return None
+    return payload
 
 
 def current_identity():

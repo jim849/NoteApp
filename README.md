@@ -23,6 +23,12 @@ Generate a second, independent secret with `openssl rand -hex 32` and set
 encryption key stable and back it up separately from database backups: losing or
 replacing it makes previously encrypted comments unreadable.
 
+Generate a third, independent secret with `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
+and set `JWT_SECRET` in `.env`. This uses 32 random bytes (256 bits) for JWT signing.
+There is no default: Compose and the app require this variable. In production,
+inject it from a secrets store; never commit the real value. Rotating this key
+invalidates old JWTs, so log out and sign in again to obtain a new token.
+
 Then start the app:
 
 ```
@@ -122,6 +128,29 @@ docker compose exec -T web python migrate_comments.py
 
 If starting with `python app.py` or `flask run` outside Docker, supply the same
 environment variables and run `python migrate_comments.py` before serving traffic.
+
+## Class 7: fix the login
+
+`verify_jwt()` accepts only the exact algorithm `HS256`, checks HMAC-SHA256 with
+`hmac.compare_digest`, and rejects unsigned or invalid tokens. `JWT_SECRET` is
+required from the environment and has no fallback. The Class 7 predictions,
+original-token verification results and final Audit line are in [JWT_LOGIN_FIX_LAB.md](JWT_LOGIN_FIX_LAB.md).
+
+The final lab check uses your two original Class 6 forgeries stored locally in
+the Git-ignored `.jwt-lab-tokens/` directory; the script does not generate replacements.
+On another machine, supply the same original token files at the following paths:
+
+```
+docker compose exec -T web python /host/verify_login_fix.py --stage fixed \
+  --none-token-file /host/.jwt-lab-tokens/original-none.jwt \
+  --signed-token-file /host/.jwt-lab-tokens/original-signed.jwt
+```
+
+JWT regression tests (no database required):
+
+```
+docker compose exec -T web python -m unittest discover -s tests -p test_jwt.py -v
+```
 
 ## Classes 4 and 5: signed grade exports
 
