@@ -1,0 +1,58 @@
+Exercise — Forge a Token: Become a Teacher
+
+Part 1 — Unsigned JWT Forgery
+
+Prediction:
+I think the unsigned token will work if the server accepts "alg":"none". It would skip the signature check and trust the "teacher" role I put in the payload.
+
+Step 1 — Inspect the original JWT
+
+Header: {"alg":"HS256","typ":"JWT"}
+Payload: {"user_id":6,"username":"alice","role":"student"}
+
+The payload says my role is "student". It is not encrypted: it is Base64URL-encoded and can be decoded without a key.
+
+Steps 2–4 — Forge an unsigned teacher token
+
+I created a JWT with "alg":"none", set the role to "teacher", and left the signature empty. I then sent it to /api/notes/3.
+
+The request succeeded and returned Bob's note:
+- Student: bob
+- Subject: Mathematics
+- Grade: 12.6
+- Comment: "Solid work, keep it up."
+
+The server accepted the unsigned token and trusted the teacher role I supplied.
+
+
+Part 2 — Crack the Secret and Sign a Teacher Token
+
+Prediction:
+I think forgery could still work if the signing secret is weak. I could test a wordlist against Alice's original token, then use the matching secret to sign a teacher token. Rejecting "alg":"none" would not stop this.
+
+Step 5 — Crack the signing secret
+
+I tested words from jwt-secrets.txt by calculating the HMAC-SHA256 signature for Alice's original token and comparing it with the existing signature.
+
+The matching secret was "s3cr3t", found at the eighth word in the list.
+
+Random-key estimate:
+Assuming 95 possible characters per position, a uniformly random 32-character key has 95^32 ≈ 1.94 × 10^63 possible combinations. At one billion guesses per second, searching the entire space would take about 6.1 × 10^46 years. Guessing such a key would be practically infeasible.
+
+Step 6 — Sign a teacher token
+
+Using "s3cr3t", I signed a new HS256 token with this payload:
+{"user_id":6,"username":"alice","role":"teacher"}
+
+I kept Alice's identity and changed her role from student to teacher. Sending this token to /api/notes/3 successfully returned Bob's Mathematics grade of 12.6 and the comment "Solid work, keep it up."
+
+Rejecting "alg":"none" would not have stopped this attack because the forged token had a valid HS256 signature calculated using the recovered secret.
+
+
+Final Finding
+
+FORGED-TOKEN FINDING — NotesApp flaw #4 (auth)
+What I read: bob's Mathematics grade (12.6) and comment ("Solid work, keep it up."), via /api/notes/3.
+Break 1: used a JWT with "alg":"none", no signature, and role set to "teacher" to read bob's note.
+Break 2: cracked the HS256 secret ("s3cr3t") using a wordlist, then signed a token keeping alice's identity and changing her role to "teacher"; this also returned bob's note.
+Why it worked: the server let the token choose how to verify its signature, and its signing secret was guessable.
