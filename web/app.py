@@ -395,15 +395,15 @@ def admin():
 
 @app.route("/admin/ping", methods=["POST"])
 def admin_ping():
-    # Flaw #11: no CSRF token. Flaw #9: command injection via os/system shell.
+    # Flaw #11: no CSRF token.
     if not login_required("admin"):
         return redirect(url_for("login"))
     host = request.form.get("host", "")
-    # Host is concatenated straight into a shell command.
-    cmd = "ping -c 1 " + host
+    # Pass the host as one argument; never interpret it as shell syntax.
     try:
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=10,
+            ["ping", "-c", "1", "--", host],
+            capture_output=True, text=True, timeout=10,
         )
         output = result.stdout + result.stderr
     except Exception as e:
