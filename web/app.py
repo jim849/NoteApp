@@ -8,6 +8,7 @@ import csv
 import io
 import hmac
 import json
+import secrets
 import time
 import base64
 import hashlib
@@ -38,6 +39,7 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "dev-session-key")
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 comment_cipher = CommentCipher.from_env()
 
 LOG_FILE = os.environ.get("NOTESAPP_LOG", "/var/log/notesapp/app.log")
@@ -119,6 +121,23 @@ def current_identity():
 
 
 # --- Auth helpers -------------------------------------------------------------
+@app.template_global()
+def csrf_token():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_urlsafe(32)
+    return session["csrf_token"]
+
+
+@app.before_request
+def verify_csrf():
+    if request.method != "POST" or request.endpoint in (None, "login"):
+        return
+    expected = session.get("csrf_token")
+    submitted = request.form.get("csrf_token", "")
+    if not expected or not submitted.isascii() or not hmac.compare_digest(expected, submitted):
+        abort(400, description="CSRF token missing or wrong")
+
+
 def login_required(role=None):
     if "user_id" not in session:
         return False
@@ -208,6 +227,7 @@ def login():
             conn.close()
 
         if row:
+            session.pop("csrf_token", None)
             session["user_id"] = row["id"]
             session["username"] = row["username"]
             session["role"] = row["role"]
@@ -310,7 +330,6 @@ def teacher():
 
 @app.route("/grades", methods=["POST"])
 def grades():
-    # Flaw #11: no CSRF token checked on this state-changing POST.
     if not login_required("teacher"):
         return redirect(url_for("login"))
     note_id = request.form.get("note_id", "").strip()
@@ -395,7 +414,6 @@ def admin():
 
 @app.route("/admin/ping", methods=["POST"])
 def admin_ping():
-    # Flaw #11: no CSRF token.
     if not login_required("admin"):
         return redirect(url_for("login"))
     host = request.form.get("host", "")

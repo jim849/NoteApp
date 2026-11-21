@@ -13,6 +13,7 @@ class CommentRenderingTests(unittest.TestCase):
             autoescape=select_autoescape(),
         )
         self.templates.globals["url_for"] = lambda endpoint, **values: "/" + endpoint
+        self.templates.globals["csrf_token"] = lambda: "test-form-token"
 
     def check_comment(self, comment, escaped):
         for template_name in ("dashboard.html", "teacher.html"):

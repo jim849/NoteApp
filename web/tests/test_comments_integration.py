@@ -3,6 +3,7 @@ import base64
 import hashlib
 import hmac
 import os
+import re
 import unittest
 import uuid
 from unittest.mock import patch
@@ -156,10 +157,13 @@ class CommentIntegrationTests(unittest.TestCase):
 
     def test_create_and_update_encrypt_including_empty_comment_and_new_nonces(self):
         self.sign_in("teacher")
+        form = self.client.get("/teacher").get_data(as_text=True)
+        token = re.search(r'name="csrf_token" value="([^"]+)"', form).group(1)
         for comment in ("新增中文评语 😀", "", "aesgcm:v1:this is user text"):
             with self.subTest(comment=comment):
                 response = self.client.post("/grades", data={"student_id": "1", "class_id": "1",
-                                                           "grade": "15", "comment": comment})
+                                                           "grade": "15", "comment": comment,
+                                                           "csrf_token": token})
                 self.assertEqual(response.status_code, 302)
                 with self.conn.cursor() as cur:
                     cur.execute("SELECT id, comment FROM notes ORDER BY id DESC LIMIT 1")
@@ -168,7 +172,7 @@ class CommentIntegrationTests(unittest.TestCase):
                 self.assertNotEqual(row["comment"], comment)
                 before = row["comment"]
                 response = self.client.post("/grades", data={"note_id": row["id"], "grade": "16",
-                                                           "comment": comment})
+                                                           "comment": comment, "csrf_token": token})
                 self.assertEqual(response.status_code, 302)
                 after = self.stored(row["id"])
                 self.assertNotEqual(before, after)
